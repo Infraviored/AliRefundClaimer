@@ -4,17 +4,65 @@ from button_handler import add_checkboxes_to_orders
 from refund_link_collector import handle_refund_process
 from refunder import process_refunds
 import time
+import logging
+import os
+import traceback
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if os.getenv('DEBUG') else logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 # Constants
 IMAGE_PATH = "/home/schneider/Downloads/hermes_return_page-0001.jpg"
 REFUND_MESSAGE = "The package was not picked up in time and was RETURNED to the sender. The attached document shows this"
-
 # Test URLs for development
 DEV_TEST_URLS = [
-    "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938137135",
-    "https://www.aliexpress.com/p/order/detail.html?orderId=3044357010087135",
-    # Add more URLs as needed
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352647135"
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938137135",
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3044357010087135",
 ]
+
+# Default refund message
+DEFAULT_REFUND_MESSAGE = "The package was not picked up in time and was RETURNED to the sender. The attached document shows this"
+
+def get_user_input():
+    """Get refund message and image path from user"""
+    print("\n🔧 Setup Configuration:")
+    
+    # Check for hardcoded image path
+    if 'IMAGE_PATH' in globals():
+        print(f"  • Using hardcoded image path: {IMAGE_PATH}")
+        image_path = IMAGE_PATH
+    else:
+        while True:
+            image_path = input("\nEnter the path to your proof image: ").strip()
+            if os.path.exists(image_path):
+                print(f"  • ✅ Image found: {image_path}")
+                break
+            print("  • ❌ Image not found, please try again")
+    
+    # Check for hardcoded refund message
+    if 'REFUND_MESSAGE' in globals():
+        print(f"  • Using hardcoded refund message")
+        refund_message = REFUND_MESSAGE
+    else:
+        print("\nUse default refund message?")
+        print(f"  {DEFAULT_REFUND_MESSAGE}")
+        choice = input("\nPress Enter to use default, or 'n' for custom message: ").strip().lower()
+        
+        if choice == 'n':
+            refund_message = input("\nEnter your custom refund message: ").strip()
+            print(f"  • ✅ Using custom message")
+        else:
+            refund_message = DEFAULT_REFUND_MESSAGE
+            print(f"  • ✅ Using default message")
+    
+    return image_path, refund_message
+
+
 
 def create_order_dict(urls: list[str]) -> dict:
     """Create initial dictionary with order IDs as keys"""
@@ -31,15 +79,15 @@ def create_order_dict(urls: list[str]) -> dict:
 
 def print_order_state(order_dict: dict, stage: str):
     """Debug print current state of orders"""
-    print(f"\n🔍 Order State after {stage}:")
-    print("-"*20)
+    logger.debug(f"\nOrder State after {stage}:")
+    logger.debug("-"*20)
     for order_id, data in order_dict.items():
-        print(f"\nOrder ID: {order_id}")
+        logger.debug(f"\nOrder ID: {order_id}")
         for key, value in data.items():
-            print(f"  {key}: {value}")
-    print("raw dictionary:")
-    print(order_dict)
-    print("-"*20)
+            logger.debug(f"  {key}: {value}")
+    logger.debug("\nRaw dictionary:")
+    logger.debug(order_dict)
+    logger.debug("-"*20)
 
 def dev_mode(page):
     """Development mode: directly process test URLs"""
@@ -47,6 +95,9 @@ def dev_mode(page):
     
     # Create initial order dictionary
     order_dict = create_order_dict(DEV_TEST_URLS)
+    print("\n📋 Orders to process:")
+    for order_id in order_dict.keys():
+        print(f"  • {order_id}")
     print_order_state(order_dict, "initialization")
     
     # Get refund URLs
@@ -59,7 +110,10 @@ def dev_mode(page):
         order_dict = process_refunds(page, order_dict, IMAGE_PATH, REFUND_MESSAGE)
         print_order_state(order_dict, "refund processing")
 
-def main(development_mode=True):  # Set to True for testing
+def main(development_mode=True):
+    # Get user input for configuration
+    image_path, refund_message = get_user_input()
+    
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=False,
@@ -95,13 +149,9 @@ def main(development_mode=True):  # Set to True for testing
             login_handler.navigate_to_orders()
             
             if development_mode:
-                # Run development test mode
                 dev_mode(page)
             else:
-                # Normal operation mode
                 add_checkboxes_to_orders(page)
-                
-                # Setup processing trigger
                 page.evaluate('''() => {
                     window.startProcessing = false;
                     document.addEventListener('processOrdersClicked', () => {
@@ -110,9 +160,9 @@ def main(development_mode=True):  # Set to True for testing
                     });
                 }''')
                 
-                print("\nSetup complete!")
+                print("\n✅ Setup complete!")
                 print("Select orders and click 'Process Selected Orders' to begin")
-                print("Press Ctrl+C when you want to quit.")
+                print("Press Ctrl+C to quit")
                 
                 while True:
                     try:
@@ -120,33 +170,30 @@ def main(development_mode=True):  # Set to True for testing
                         if should_process:
                             urls = page.evaluate('window.selectedOrderUrls || []')
                             if urls and len(urls) > 0:
-                                print(f"\nProcessing {len(urls)} orders...")
-                                # Get refund URLs
-                                order_to_refund = handle_refund_process(page, urls, REFUND_MESSAGE)
+                                order_dict = create_order_dict(urls)
+                                print(f"\n📋 Processing {len(urls)} orders:")
+                                for order_id in order_dict.keys():
+                                    print(f"  • {order_id}")
                                 
-                                if order_to_refund:
-                                    print("\n🎯 Starting refund submissions...")
-                                    # Process all refund URLs
-                                    refund_urls = list(order_to_refund.values())
-                                    process_refunds(page, refund_urls, IMAGE_PATH, REFUND_MESSAGE)
+                                order_dict = handle_refund_process(page, order_dict)
+                                if any(data['refund_url'] for data in order_dict.values()):
+                                    order_dict = process_refunds(page, order_dict, image_path, refund_message)
                                 
-                                # Reset flags after processing
                                 page.evaluate('''() => {
                                     window.startProcessing = false;
                                     window.selectedOrderUrls = [];
                                 }''')
-                                print("\nWaiting for new orders to process...")
+                                print("\n⏳ Waiting for new orders...")
                         time.sleep(1)
                     except Exception as e:
-                        print(f"ERROR in main loop: {str(e)}")
-                        import traceback
-                        print(traceback.format_exc())
+                        logger.error(f"Error in main loop: {str(e)}")
+                        logger.debug(traceback.format_exc())
                 
         except KeyboardInterrupt:
-            print("\nClosing browser...")
+            print("\n👋 Closing browser...")
         finally:
-            input("Press Enter to close the browser...")
+            input("\nPress Enter to close the browser...")
             browser.close()
 
 if __name__ == "__main__":
-    main(development_mode=True)  # Set to True for testing, False for normal operation
+    main(development_mode=False)
