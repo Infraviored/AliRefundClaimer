@@ -1,6 +1,6 @@
 from playwright.sync_api import sync_playwright
 import time
-from order_processor import handle_refund_process  # Import the actual processor
+from refund_link_collector import handle_refund_process  # Import the actual processor
 
 def test_process_orders():
     """Test script for processing orders with existing browser session"""

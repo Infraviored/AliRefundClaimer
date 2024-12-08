@@ -1,8 +1,13 @@
 from playwright.sync_api import sync_playwright
 from login_handler import LoginHandler
 from button_handler import add_checkboxes_to_orders
-from order_processor import handle_refund_process
+from refund_link_collector import handle_refund_process
+from refunder import process_refunds
 import time
+
+# Constants
+IMAGE_PATH = "/home/schneider/Downloads/hermes_return_page-0001.jpg"
+REFUND_MESSAGE = "The package was not picked up in time and was RETURNED to the sender. The attached document shows this"
 
 # Test URLs for development
 DEV_TEST_URLS = [
@@ -11,11 +16,48 @@ DEV_TEST_URLS = [
     # Add more URLs as needed
 ]
 
+def create_order_dict(urls: list[str]) -> dict:
+    """Create initial dictionary with order IDs as keys"""
+    order_dict = {}
+    for url in urls:
+        if 'orderId=' in url:
+            order_id = url.split('orderId=')[1].split('&')[0]
+            order_dict[order_id] = {
+                'order_url': url,
+                'refund_url': None,
+                'refund_state': None
+            }
+    return order_dict
+
+def print_order_state(order_dict: dict, stage: str):
+    """Debug print current state of orders"""
+    print(f"\n🔍 Order State after {stage}:")
+    print("-"*20)
+    for order_id, data in order_dict.items():
+        print(f"\nOrder ID: {order_id}")
+        for key, value in data.items():
+            print(f"  {key}: {value}")
+    print("raw dictionary:")
+    print(order_dict)
+    print("-"*20)
+
 def dev_mode(page):
     """Development mode: directly process test URLs"""
     print("\n🔍 Starting development test mode...")
-    print(f"Processing {len(DEV_TEST_URLS)} test orders...")
-    handle_refund_process(page, DEV_TEST_URLS)
+    
+    # Create initial order dictionary
+    order_dict = create_order_dict(DEV_TEST_URLS)
+    print_order_state(order_dict, "initialization")
+    
+    # Get refund URLs
+    order_dict = handle_refund_process(page, order_dict)
+    print_order_state(order_dict, "getting refund URLs")
+    
+    # Process refunds
+    if any(data['refund_url'] for data in order_dict.values()):
+        print("\n🎯 Starting refund submissions...")
+        order_dict = process_refunds(page, order_dict, IMAGE_PATH, REFUND_MESSAGE)
+        print_order_state(order_dict, "refund processing")
 
 def main(development_mode=True):  # Set to True for testing
     with sync_playwright() as p:
@@ -79,8 +121,14 @@ def main(development_mode=True):  # Set to True for testing
                             urls = page.evaluate('window.selectedOrderUrls || []')
                             if urls and len(urls) > 0:
                                 print(f"\nProcessing {len(urls)} orders...")
-                                # Hand over the full list to the processor
-                                handle_refund_process(page, urls)
+                                # Get refund URLs
+                                order_to_refund = handle_refund_process(page, urls, REFUND_MESSAGE)
+                                
+                                if order_to_refund:
+                                    print("\n🎯 Starting refund submissions...")
+                                    # Process all refund URLs
+                                    refund_urls = list(order_to_refund.values())
+                                    process_refunds(page, refund_urls, IMAGE_PATH, REFUND_MESSAGE)
                                 
                                 # Reset flags after processing
                                 page.evaluate('''() => {
