@@ -31,6 +31,7 @@ import time
 import logging
 import os
 import json
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -55,14 +56,14 @@ logger = logging.getLogger(__name__)
 #   • 3042417938197135
 #   • 3042417938217135
 DEV_TEST_URLS = [
-#     "https://www.aliexpress.com/p/order/detail.html?orderId=3044357010127135",  # 2 refund buttons
-#     "https://www.aliexpress.com/p/order/detail.html?orderId=3043329396767135",  # 2 refund buttons
-    # "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352607135",  # 2 refund buttons
-    # "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352627135",  # 2 refund buttons
-    # "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352647135",  # 2 refund buttons
-    # "https://www.aliexpress.com/p/order/detail.html?orderId=3042816799787135",  # 1 refund button
-    # "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938137135",  # 1 refund button
-    # "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938157135",  # 1 refund button
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3044357010127135",  # 2 refund buttons
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3043329396767135",  # 2 refund buttons
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352607135",  # 2 refund buttons
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352627135",  # 2 refund buttons
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352647135",  # 2 refund buttons
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3042816799787135",  # 1 refund button
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938137135",  # 1 refund button
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938157135",  # 1 refund button
     "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938177135",  # 1 button, no refund link
     "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938197135",  # 1 refund button
     "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938217135"   # 1 refund button
@@ -75,6 +76,14 @@ REFUND_MESSAGE_2 = "I do NOT AGREE. THE PACKAGE WAS RETURNED! I expect a full re
 # Default refund messages for normal mode
 DEFAULT_REFUND_MESSAGE = "The package was not picked up in time and was RETURNED to the sender. The attached document shows this"
 DEFAULT_REFUND_MESSAGE_2 = "I do NOT AGREE. THE PACKAGE WAS RETURNED! I expect a full refund! Check the attached document!"
+
+def save_dict_to_log(order_dict: dict):
+    """Save the order dictionary to a log file with timestamp"""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"log_{timestamp}.json"
+    with open(filename, 'w') as f:
+        json.dump(order_dict, f, indent=2)
+    print(f"\n📝 Results saved to {filename}")
 
 def setup_credentials() -> tuple[str, str]:
     """Set up or load credentials before browser launch"""
@@ -112,12 +121,16 @@ def get_initial_config() -> dict:
         'pause_for_review': False,
         'image_path': None,
         'refund_message': DEFAULT_REFUND_MESSAGE,
-        'refund_message_2': DEFAULT_REFUND_MESSAGE_2
+        'refund_message_2': DEFAULT_REFUND_MESSAGE_2,
+        'save_log': False
     }
     
     print("\n⚙️ Process Configuration:")
     choice = input("Pause for review after collecting refund links? (y/n): ").strip().lower()
     config['pause_for_review'] = choice == 'y'
+    
+    choice = input("Save results to log file? (y/n): ").strip().lower()
+    config['save_log'] = choice == 'y'
     
     # Get image path
     while True:
@@ -161,33 +174,114 @@ def create_order_dict(urls: list[str]) -> dict:
             }
     return order_dict
 
-def process_batch(page, urls: list[str], config: dict):
-    """Process a batch of orders."""
+def process_batch(page, urls: list[str], config: dict) -> dict:
+    """Process a batch of order URLs"""
+    print("\n📋 Processing orders:")
     order_dict = create_order_dict(urls)
-    print(f"\n📋 Processing {len(urls)} orders:")
-    for order_id in order_dict.keys():
-        print(f"  • {order_id}")
+    
+    # Print orders to process
+    print("\n📋 Orders to process:")
+    for order_id in order_dict:
+        print(f"  • Order {order_id}")
     
     # Collect refund links
     order_dict = handle_refund_process(page, order_dict)
     
-    # Optional pause for review
-    if config['pause_for_review']:
-        print("\n📋 Review collected refund links:")
-        for order_id, data in order_dict.items():
-            print(f"\nOrder {order_id}:")
-            for url in data.get('refund_urls', []):
-                print(f"  • {url}")
-        input("\nPress Enter to start processing refunds (or Ctrl+C to quit)...")
+    # Process refunds
+    print("\n🎯 Starting refund submissions...")
+    order_dict = process_refunds(
+        page=page,
+        order_dict=order_dict,
+        image_path=config['image_path'],
+        refund_message=config['refund_message'],
+        refund_message_2=config['refund_message_2']
+    )
     
-    # Process refunds if links were found
-    if any(data.get('refund_urls', []) for data in order_dict.values()):
-        print("\n🎯 Starting refund submissions...")
-        order_dict = process_refunds(page, order_dict, config['image_path'], 
-                                   config['refund_message'], config['refund_message_2'])
-    else:
-        print("\n❌ No refund links found to process!")
-        input("Press Enter to continue...")
+    # Print summary
+    print_final_summary(order_dict)
+    return order_dict  # Return the updated dictionary
+
+def print_final_summary(order_dict: dict):
+    """Print a comprehensive summary based on order dictionary states"""
+    print("\n" + "="*50)
+    print("📊 Processing Results")
+    print("="*50)
+    
+    # First show per-order results
+    print("\nPer-Order Results:")
+    for order_id, data in order_dict.items():
+        status = data.get('status', 'unknown')
+        detail = data.get('status_detail', '')
+        status_icon = {
+            'refund_submitted': '✅',
+            'evidence_submitted': '📝',
+            'refund_ongoing': '⏳',
+            'already_issued': '✨',
+            'failed': '❌',
+            'unknown': '❓'
+        }.get(status, '❓')
+        
+        print(f"{status_icon} Order {order_id}: {status.replace('_', ' ').title()}")
+        if detail:
+            print(f"   └─ Details: {detail}")
+    
+    # Then show categorized summary
+    print("\n" + "="*50)
+    print("Categorized Summary")
+    print("="*50)
+    
+    # Group orders by status
+    status_groups = {
+        'refund_submitted': [],
+        'evidence_submitted': [],
+        'refund_ongoing': [],
+        'already_issued': [],
+        'failed': []
+    }
+    
+    for order_id, data in order_dict.items():
+        status = data.get('status', 'failed')
+        status_groups[status].append(order_id)
+    
+    if status_groups['refund_submitted']:
+        print(f"\n✅ New Refund Requests Sent ({len(status_groups['refund_submitted'])} orders):")
+        for order_id in status_groups['refund_submitted']:
+            print(f"  • {order_id}")
+    
+    if status_groups['evidence_submitted']:
+        print(f"\n📝 Additional Evidence Submitted ({len(status_groups['evidence_submitted'])} orders):")
+        for order_id in status_groups['evidence_submitted']:
+            print(f"  • {order_id}")
+    
+    if status_groups['refund_ongoing']:
+        print(f"\n⏳ Refunds Under Review ({len(status_groups['refund_ongoing'])} orders):")
+        for order_id in status_groups['refund_ongoing']:
+            print(f"  • {order_id}")
+    
+    if status_groups['already_issued']:
+        print(f"\n✨ Refunds Already Issued ({len(status_groups['already_issued'])} orders):")
+        for order_id in status_groups['already_issued']:
+            print(f"  • {order_id}")
+    
+    if status_groups['failed']:
+        print(f"\n❌ Failed Processing ({len(status_groups['failed'])} orders):")
+        for order_id in status_groups['failed']:
+            detail = order_dict[order_id].get('status_detail', 'No details available')
+            print(f"  • {order_id} - {detail}")
+    
+    # Print final statistics
+    print("\n" + "="*50)
+    print("Final Statistics")
+    print("="*50)
+    
+    successful_states = ['refund_submitted', 'evidence_submitted', 'refund_ongoing', 'already_issued']
+    total_success = sum(len(status_groups[state]) for state in successful_states)
+    success_rate = (total_success / len(order_dict)) * 100 if order_dict else 0
+    
+    print(f"\n📦 Total Orders Processed: {len(order_dict)}")
+    print(f"✅ Successfully Processed: {total_success}")
+    print(f"❌ Failed: {len(status_groups['failed'])}")
+    print(f"📈 Success Rate: {success_rate:.1f}%")
 
 def main(development_mode=False):
     """Main entry point for the script."""
@@ -201,12 +295,15 @@ def main(development_mode=False):
             'pause_for_review': False,
             'image_path': IMAGE_PATH,
             'refund_message': REFUND_MESSAGE,
-            'refund_message_2': REFUND_MESSAGE_2
+            'refund_message_2': REFUND_MESSAGE_2,
+            'save_log': True
         }
         if not os.path.exists(config['image_path']):
             raise ValueError(f"Development mode requires valid IMAGE_PATH. Current path not found: {config['image_path']}")
     
     print("\n🌐 Launching browser...")
+    
+    order_dict = {}  # Initialize here
     
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -247,8 +344,8 @@ def main(development_mode=False):
             if development_mode:
                 # Process test URLs directly
                 print("\n📋 Processing test URLs...")
-                _ = create_order_dict(DEV_TEST_URLS)
-                process_batch(page, DEV_TEST_URLS, config)
+                order_dict = create_order_dict(DEV_TEST_URLS)
+                order_dict = process_batch(page, DEV_TEST_URLS, config)
             else:
                 # Normal mode - wait for button click
                 page.evaluate('''() => {
@@ -268,7 +365,7 @@ def main(development_mode=False):
                     if should_process:
                         urls = page.evaluate('window.selectedOrderUrls || []')
                         if urls and len(urls) > 0:
-                            process_batch(page, urls, config)
+                            order_dict = process_batch(page, urls, config)
                             
                         # Reset for next batch
                         page.evaluate('''() => {
@@ -281,6 +378,8 @@ def main(development_mode=False):
         except KeyboardInterrupt:
             print("\n👋 Closing browser...")
         finally:
+            if development_mode or config.get('save_log', False):
+                save_dict_to_log(order_dict)
             input("\nPress Enter to close the browser...")
             browser.close()
 

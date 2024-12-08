@@ -1,6 +1,7 @@
 import logging
 from playwright.sync_api import Page
 import time
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -225,9 +226,6 @@ class Refunder:
 
 def process_refunds(page: Page, order_dict: dict, image_path: str, refund_message: str, refund_message_2: str) -> dict:
     """Process refunds and update dictionary with results"""
-    successful = 0
-    failed = 0
-    
     print("\n📋 Processing refunds:")
     
     # Clean up any existing refund tabs first
@@ -268,65 +266,72 @@ def process_refunds(page: Page, order_dict: dict, image_path: str, refund_messag
                     print(f"✅ Added {len(new_refund_urls)} new refund URLs")
                 else:
                     print("❌ No new refund URLs detected")
+                    data['status'] = 'failed'
+                    data['status_detail'] = 'no_refund_links_found'
+                    continue
             
             elif choice == "2":
                 manual_url = input("\nEnter the refund URL: ").strip()
                 if manual_url:
                     refund_urls.append(manual_url)
                     data['refund_urls'] = refund_urls
-                    print("✅ Added manual refund URL")
+                else:
+                    data['status'] = 'failed'
+                    data['status_detail'] = 'manual_url_empty'
+                    continue
             
-            elif choice == "3":
+            else:  # choice == "3" or invalid
                 print("Skipping order...")
-                continue
-            
-            # If still no URLs, skip this order
-            if not refund_urls:
-                print(f"❌ No refund URLs available for Order {order_id}, skipping...")
-                failed += 1
+                data['status'] = 'failed'
+                data['status_detail'] = 'skipped_by_user'
                 continue
         
         print(f"\n🔄 Order {order_id}:")
         
         for i, refund_url in enumerate(refund_urls, 1):
-            logger.debug(f"Processing URL: {refund_url}")
             print(f"  • Processing item {i} of {len(refund_urls)}")
             
             try:
-                # Open fresh tab with Playwright
                 refund_page = page.context.new_page()
                 refund_page.goto(refund_url)
                 refund_page.bring_to_front()
                 refund_page.wait_for_load_state('networkidle')
                 
-                # Create new Refunder instance with the new page
                 refunder = Refunder(refund_page, image_path, refund_message, refund_message_2)
                 status = refunder.check_refund_status()
+                
+                # Update the order data with status
+                data['status'] = status
+                data['last_checked_url'] = refund_url
+                data['last_check_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 
                 match status:
                     case "refund_already_issued":
                         print("    ✅ Refund already issued")
-                        successful += 1
+                        data['status'] = 'already_issued'
                     case "needs_response":
                         if refunder.handle_waiting_response():
                             print("    ✅ Additional evidence submitted")
-                            successful += 1
+                            data['status'] = 'evidence_submitted'
                         else:
                             print("    ❌ Failed to submit additional evidence")
-                            failed += 1
+                            data['status'] = 'failed'
+                            data['status_detail'] = 'evidence_submission_failed'
                     case "can_submit":
                         if refunder.fill_refund_form():
                             print("    ✅ Refund submitted")
-                            successful += 1
+                            data['status'] = 'refund_submitted'
                         else:
                             print("    ❌ Failed to submit refund")
-                            failed += 1
+                            data['status'] = 'failed'
+                            data['status_detail'] = 'refund_submission_failed'
                     case "refund_ongoing":
                         print("    ⏳ Refund is under review by AliExpress")
-                        successful += 1  # Count as success since it's a valid state
+                        data['status'] = 'refund_ongoing'
                     case _:
                         print("    ❌ Status unclear")
-                        failed += 1
+                        data['status'] = 'failed'
+                        data['status_detail'] = 'status_unclear'
                 
                 # Close the tab after processing
                 refund_page.close()
@@ -334,13 +339,9 @@ def process_refunds(page: Page, order_dict: dict, image_path: str, refund_messag
             except Exception as e:
                 logger.error(f"Error processing order {order_id}: {e}")
                 print(f"    ❌ Processing failed: {e}")
-                failed += 1
+                data['status'] = 'failed'
+                data['status_detail'] = str(e)
             
             time.sleep(2)
-    
-    print("\n📊 Summary:")
-    print(f"  • ✅ Successful: {successful}")
-    print(f"  • ❌ Failed: {failed}")
-    print(f"  • 📦 Total: {len(order_dict)}")
     
     return order_dict
