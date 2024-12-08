@@ -27,6 +27,11 @@ def handle_refund_process(page: Page, order_dict: dict) -> dict:
         for order_id in order_dict.keys():
             print(f"  • Order {order_id}")
         
+        # Close any existing refund pages before starting
+        for p in page.context.pages:
+            if 'reverse-pages' in p.url:
+                p.close()
+        
         order_items = list(order_dict.items())
         for i, (order_id, data) in enumerate(order_items):
             logger.debug(f"\nProcessing order URL: {data['order_url']}")
@@ -34,7 +39,7 @@ def handle_refund_process(page: Page, order_dict: dict) -> dict:
             try:
                 # Navigate to order
                 page.goto(data['order_url'])
-                page.bring_to_front()  # Make sure we see the current order being processed
+                page.bring_to_front()
                 page.wait_for_load_state('networkidle')
                 
                 # Find all refund buttons for this order
@@ -46,10 +51,12 @@ def handle_refund_process(page: Page, order_dict: dict) -> dict:
                 print(f"\nProcessing refund buttons for Order {order_id}...")
                 print(f"  • Found {len(refund_buttons)} buttons")
                 
-                # Click all refund buttons first
+                # Click all refund buttons for this order
                 for button_index, refund_button in enumerate(refund_buttons):
                     print(f"  • Clicking button {button_index + 1} of {len(refund_buttons)}")
                     refund_button.click()
+                    
+                    # Wait for potential "No" button
                     time.sleep(WAIT_AFTER_BUTTON_CLICK)
                     
                     # Handle "No" button if it appears
@@ -59,7 +66,33 @@ def handle_refund_process(page: Page, order_dict: dict) -> dict:
                         no_button.click()
                         time.sleep(WAIT_AFTER_NO_BUTTON)
                 
-                # Navigate to next order or back to list to force context update
+                # Wait for new tabs to open and load
+                print(f"  • Waiting for refund pages to load...")
+                time.sleep(2)  # Hard wait for tab opening
+                
+                # Wait for all pages to finish loading
+                for p in page.context.pages:
+                    if 'reverse-pages' in p.url:
+                        try:
+                            p.wait_for_load_state('networkidle', timeout=5000)
+                        except Exception as e:
+                            logger.warning(f"Page load timeout: {e}")
+                
+                # Collect all refund pages that were opened for this order
+                refund_pages = get_refund_pages(page.context)
+                order_dict[order_id]['refund_urls'] = refund_pages
+                
+                if refund_pages:
+                    print(f"  • Order {order_id}: ✅ Found {len(refund_pages)} refund links")
+                else:
+                    print(f"  • Order {order_id}: ❌ No refund links found")
+                
+                # Close all refund pages before moving to next order
+                for p in page.context.pages:
+                    if 'reverse-pages' in p.url:
+                        p.close()
+                
+                # Navigate to next order or back to list
                 if i < len(order_items) - 1:
                     next_url = order_items[i + 1][1]['order_url']
                     print("  • Navigating to next order...")
@@ -69,20 +102,6 @@ def handle_refund_process(page: Page, order_dict: dict) -> dict:
                 
                 page.goto(next_url)
                 time.sleep(WAIT_AFTER_NAVIGATION)
-                
-                # Now check for all refund pages that were opened
-                refund_pages = get_refund_pages(page.context)
-                logger.debug("Found refund pages:")
-                for p in refund_pages:
-                    logger.debug(f"- {p}")
-                
-                # Store all refund URLs for this order
-                order_dict[order_id]['refund_urls'] = refund_pages
-                
-                if refund_pages:
-                    print(f"  • Order {order_id}: ✅ Found {len(refund_pages)} refund links")
-                else:
-                    print(f"  • Order {order_id}: ❌ No refund links found")
                 
             except Exception as e:
                 logger.error(f"Error processing order {order_id}: {e}")

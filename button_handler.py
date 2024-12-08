@@ -1,9 +1,16 @@
 from playwright.sync_api import Page
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
 
 def add_checkboxes_to_orders(page: Page):
     """Add selection buttons to orders and process button"""
     try:
-        print("Adding selection buttons to orders...")
+        print("\n🔄 Adding selection buttons to orders...")
+        
+        # Wait for orders to be visible first
+        page.wait_for_selector('.order-item', timeout=10000)
         
         # Filter console messages to only show our debug messages
         def handle_console(msg):
@@ -11,6 +18,12 @@ def add_checkboxes_to_orders(page: Page):
                 print(f"BROWSER: {msg.text}")
                 
         page.on("console", handle_console)
+        
+        # Check if buttons are already added
+        existing_buttons = page.locator('.selection-button').count()
+        if existing_buttons > 0:
+            print("  • Buttons already present")
+            return
         
         page.evaluate('''() => {
             // Function to add button to a single order
@@ -78,7 +91,11 @@ def add_checkboxes_to_orders(page: Page):
             }, 1000);
         }''')
         
-        print("DEBUG: Setup complete - buttons and handlers added")
+        # Verify buttons were added
+        page.wait_for_selector('.selection-button', timeout=5000)
+        print("  • ✅ Selection buttons added successfully")
         
     except Exception as e:
-        print(f"Error adding buttons: {e}")
+        print(f"❌ Error adding buttons: {e}")
+        logger.error(f"Button addition failed: {e}")
+        logger.debug(traceback.format_exc())

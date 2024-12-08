@@ -57,7 +57,7 @@ class LoginHandler:
             print("  • Language set to English")
             
             logger.debug("Waiting for page to stabilize after language change")
-            time.sleep(1)
+            time.sleep(3)
             
             self.page.wait_for_load_state('networkidle')
             
