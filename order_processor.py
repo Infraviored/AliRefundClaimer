@@ -1,63 +1,78 @@
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError
 import time
 
-def wait_for_orders_page_ready(page: Page):
-    """Wait for the orders page to be fully loaded"""
-    print("Waiting for orders page to be fully loaded...")
-    try:
-        # Wait a moment for initial load
-        time.sleep(3)
-        
-        # Wait for key elements
-        page.wait_for_selector('.order-item', timeout=10000)
-        page.wait_for_selector('.order-item-btns', timeout=10000)
-        print("✓ Orders page is ready")
-        
-    except Exception as e:
-        print(f"❌ Error waiting for orders page: {e}")
+def print_pages(context, prefix="Current pages"):
+    """Helper to print all current pages"""
+    print(f"\nDEBUG: {prefix}:")
+    for p in context.pages:
+        print(f"- {p.url}")
+
+def force_context_update(page: Page):
+    """Force Playwright to update its context by doing a tiny navigation"""
+    current_url = page.url
+    page.goto(current_url)
+    page.wait_for_load_state('networkidle')
 
 def handle_refund_process(page: Page, url: str):
-    """Process a single refund URL with detailed logging"""
+    """Process a single refund URL"""
     try:
-        print(f"\n🔄 Processing URL: {url}")
-        
-        # Navigate to the order detail page
-        print("Navigating to order detail page...")
+        print(f"\nProcessing order: {url}")
         page.goto(url)
         page.wait_for_load_state('networkidle')
-        print(f"✓ Page loaded: {page.url}")
         
-        # Look for refund button
-        print("\nLooking for Returns/refunds button...")
-        refund_button = page.locator('span[data-spm-anchor-id*="Returns/refunds"]')
+        context = page.context
         
-        try:
-            refund_button.wait_for(state='visible', timeout=10000)
-            print("✓ Found Returns/refunds button")
-            refund_button.click()
-            print("✓ Clicked Returns/refunds button")
-        except Exception as e:
-            print(f"❌ Error finding/clicking refund button: {e}")
-            print(f"Current page content: {page.content()}")
-            return False
+        print("\nLooking for Returns/refunds buttons...")
+        refund_button = page.locator('button.comet-btn:has-text("Returns/refunds")').first
+        if not refund_button.is_visible():
+            raise Exception("Could not find Returns/refunds button")
         
-        # Look for No button
-        print("\nLooking for 'No' button...")
-        no_button = page.locator('button.comet-btn span[data-spm-anchor-id*="No"]')
+        # Get initial state
+        initial_urls = [p.url for p in context.pages]
+        print_pages(context, "Before clicking Returns/refunds")
         
-        try:
-            no_button.wait_for(state='visible', timeout=10000)
-            print("✓ Found 'No' button")
-            no_button.click()
-            print("✓ Clicked 'No' button")
-        except Exception as e:
-            print(f"❌ Error finding/clicking No button: {e}")
-            print(f"Current page content: {page.content()}")
-            return False
+        # Click Returns/refunds
+        refund_button.click()
+        print("Clicked Returns/refunds button")
+        time.sleep(3)
+        
+        # Force context update and check for new pages
+        force_context_update(page)
+        current_urls = [p.url for p in context.pages]
+        print_pages(context, "After Returns/refunds")
+        
+        if len(current_urls) > len(initial_urls):
+            print("\n🎯 SUCCESS! New page opened!")
+            return True
+        
+        # Try No button
+        print("\nLooking for 'No' button in popup...")
+        no_button = page.locator('.comet-modal button.comet-btn:not(.comet-btn-primary):has-text("No")').first
+        if not no_button.is_visible():
+            raise Exception("Could not find No button")
+        
+        # Store current state
+        initial_urls = [p.url for p in context.pages]
+        print_pages(context, "Before clicking No")
+        
+        no_button.click()
+        print("Clicked 'No' button")
+        time.sleep(3)
+        
+        # Force context update and check for new pages again
+        force_context_update(page)
+        current_urls = [p.url for p in context.pages]
+        print_pages(context, "After clicking No")
+        
+        if len(current_urls) > len(initial_urls):
+            print("\n🎯 SUCCESS! New page opened!")
+            return True
             
-        print("\n✅ Successfully processed refund for this order")
-        return True
+        print("\nDEBUG: Final state:")
+        print_pages(context)
+        raise Exception("No new pages detected")
         
     except Exception as e:
-        print(f"❌ Unexpected error processing refund: {e}")
-        return False
+        print(f"\n❌ Failed to process refund: {e}")
+        print_pages(context, "Final state")
+        return None

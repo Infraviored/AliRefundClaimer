@@ -1,12 +1,18 @@
 from playwright.sync_api import Page
 
 def add_checkboxes_to_orders(page: Page):
+    """Add selection buttons to orders and process button"""
     try:
-        print("DEBUG: Starting to add checkboxes...")
+        print("Adding selection buttons to orders...")
+        
+        # Filter console messages to only show our debug messages
+        def handle_console(msg):
+            if msg.text.startswith('DEBUG:'):
+                print(f"BROWSER: {msg.text}")
+                
+        page.on("console", handle_console)
+        
         page.evaluate('''() => {
-            // Store selected URLs globally
-            window.selectedOrderUrls = window.selectedOrderUrls || [];
-            
             // Function to add button to a single order
             function addButtonToOrder(order) {
                 if (order.querySelector('.selection-button')) return;
@@ -23,12 +29,11 @@ def add_checkboxes_to_orders(page: Page):
                         this.style.backgroundColor = '';
                         this.style.color = '';
                         window.selectedOrderUrls = window.selectedOrderUrls.filter(u => u !== url);
-                        console.log('DEBUG: Order deselected:', url);
                     } else {
                         this.style.backgroundColor = '#009966';
                         this.style.color = 'white';
+                        if (!window.selectedOrderUrls) window.selectedOrderUrls = [];
                         window.selectedOrderUrls.push(url);
-                        console.log('DEBUG: Order selected:', url);
                     }
                 };
                 order.querySelector('.order-item-btns').appendChild(button);
@@ -55,14 +60,13 @@ def add_checkboxes_to_orders(page: Page):
                 `;
                 
                 processButton.onclick = function() {
-                    console.log('DEBUG: Process button clicked. Selected URLs:', window.selectedOrderUrls);
                     document.dispatchEvent(new CustomEvent('processOrdersClicked'));
                 };
                 
                 document.body.appendChild(processButton);
             }
 
-            // Add buttons to existing orders
+            // Add buttons to all orders
             document.querySelectorAll('.order-item').forEach(addButtonToOrder);
             
             // Keep checking for new orders
@@ -71,10 +75,7 @@ def add_checkboxes_to_orders(page: Page):
             }, 1000);
         }''')
         
-        # Add console message handler
-        page.on("console", lambda msg: print(f"BROWSER: {msg.type} - {msg.text}"))
-        
         print("DEBUG: Setup complete - buttons and handlers added")
         
     except Exception as e:
-        print(f"ERROR in add_checkboxes_to_orders: {str(e)}")
+        print(f"Error adding buttons: {e}")
