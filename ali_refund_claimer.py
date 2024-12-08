@@ -15,22 +15,7 @@ def dev_mode(page):
     """Development mode: directly process test URLs"""
     print("\n🔍 Starting development test mode...")
     print(f"Processing {len(DEV_TEST_URLS)} test orders...")
-    
-    successful = 0
-    failed = 0
-    
-    for i, url in enumerate(DEV_TEST_URLS, 1):
-        print(f"\nOrder {i}/{len(DEV_TEST_URLS)} {'='*20}")
-        if handle_refund_process(page, url):
-            successful += 1
-        else:
-            failed += 1
-        time.sleep(2)
-    
-    print(f"\nProcessing complete!")
-    print(f"Successful: {successful}")
-    print(f"Failed: {failed}")
-    print(f"Total: {len(DEV_TEST_URLS)}")
+    handle_refund_process(page, DEV_TEST_URLS)
 
 def main(development_mode=True):  # Set to True for testing
     with sync_playwright() as p:
@@ -94,21 +79,8 @@ def main(development_mode=True):  # Set to True for testing
                             urls = page.evaluate('window.selectedOrderUrls || []')
                             if urls and len(urls) > 0:
                                 print(f"\nProcessing {len(urls)} orders...")
-                                successful = 0
-                                failed = 0
-                                
-                                for i, url in enumerate(urls, 1):
-                                    print(f"\nOrder {i}/{len(urls)} {'='*20}")
-                                    if handle_refund_process(page, url):
-                                        successful += 1
-                                    else:
-                                        failed += 1
-                                    time.sleep(2)
-                                
-                                print(f"\nProcessing complete!")
-                                print(f"Successful: {successful}")
-                                print(f"Failed: {failed}")
-                                print(f"Total: {len(urls)}")
+                                # Hand over the full list to the processor
+                                handle_refund_process(page, urls)
                                 
                                 # Reset flags after processing
                                 page.evaluate('''() => {
@@ -125,6 +97,7 @@ def main(development_mode=True):  # Set to True for testing
         except KeyboardInterrupt:
             print("\nClosing browser...")
         finally:
+            input("Press Enter to close the browser...")
             browser.close()
 
 if __name__ == "__main__":
