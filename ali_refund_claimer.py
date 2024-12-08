@@ -30,7 +30,6 @@ from refunder import process_refunds
 import time
 import logging
 import os
-import traceback
 import json
 
 # Configure logging
@@ -49,11 +48,13 @@ DEV_TEST_URLS = [
     "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938177135",  # 1 button, no refund link
     "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938197135"   # 1 refund button
 ]
-IMAGE_PATH = "/path/to/your/proof.jpg"  # Required for development mode
+IMAGE_PATH = "/home/schneider/Downloads/hermes_return_page-0001.jpg"  # Required for development mode
 REFUND_MESSAGE = "The package was not picked up in time and was RETURNED to the sender. The attached document shows this"
+REFUND_MESSAGE_2 = "I do NOT AGREE. THE PACKAGE WAS RETURNED! I expect a full refund! Check the attached document!"
 
-# Default refund message for normal mode
+# Default refund messages for normal mode
 DEFAULT_REFUND_MESSAGE = "The package was not picked up in time and was RETURNED to the sender. The attached document shows this"
+DEFAULT_REFUND_MESSAGE_2 = "I do NOT AGREE. THE PACKAGE WAS RETURNED! I expect a full refund! Check the attached document!"
 
 def setup_credentials() -> tuple[str, str]:
     """Set up or load credentials before browser launch"""
@@ -61,7 +62,7 @@ def setup_credentials() -> tuple[str, str]:
         print("\n📝 Found existing credentials.json")
         with open('credentials.json', 'r') as f:
             creds = json.load(f)
-        print("  • ✅ Credentials loaded successfully")
+        print("  ✅ Credentials loaded successfully")
         return creds['email'], creds['password']
     
     print("\n🔐 First-time setup: Credentials")
@@ -137,75 +138,6 @@ def create_order_dict(urls: list[str]) -> dict:
             }
     return order_dict
 
-def dev_mode(page, image_path: str, refund_message: str):
-    """
-    Development mode for testing specific orders.
-    Args:
-        page: Playwright page object
-        image_path: Path to proof image
-        refund_message: Message to use in refund
-    """
-    print("\n🔍 Starting development test mode...")
-    
-    if not os.path.exists(image_path):
-        raise ValueError(f"Development mode requires valid IMAGE_PATH. Current path not found: {image_path}")
-    
-    order_dict = create_order_dict(DEV_TEST_URLS)
-    print("\n📋 Orders to process:")
-    for order_id in order_dict.keys():
-        print(f"  • {order_id}")
-    
-    # Get refund URLs
-    order_dict = handle_refund_process(page, order_dict)
-    
-    # Process refunds
-    if any(data.get('refund_urls', []) for data in order_dict.values()):
-        input("\nPress Enter to start processing refunds...")
-        print("\n🎯 Starting refund submissions...")
-        order_dict = process_refunds(page, order_dict, image_path, refund_message)
-
-def normal_mode(page, config: dict):
-    """
-    Normal mode with UI selection of orders.
-    Args:
-        page: Playwright page object
-        config: Configuration dictionary
-    """
-    # Add the selection buttons and process button
-    add_checkboxes_to_orders(page)
-    
-    # Set up event listener for process button
-    page.evaluate('''() => {
-        window.startProcessing = false;
-        document.addEventListener('processOrdersClicked', () => {
-            console.log('DEBUG: Process button clicked');
-            window.startProcessing = true;
-        });
-    }''')
-    
-    print("\n✅ Setup complete!")
-    print("Select orders and click 'Process All Refunds' to begin")
-    print("Press Ctrl+C to quit")
-    
-    while True:
-        try:
-            should_process = page.evaluate('window.startProcessing || false')
-            if should_process:
-                urls = page.evaluate('window.selectedOrderUrls || []')
-                if urls and len(urls) > 0:
-                    process_batch(page, urls, config)
-                    
-                # Reset for next batch
-                page.evaluate('''() => {
-                    window.startProcessing = false;
-                    window.selectedOrderUrls = [];
-                }''')
-                print("\n⏳ Waiting for new orders...")
-            time.sleep(1)
-        except Exception as e:
-            logger.error(f"Error in main loop: {str(e)}")
-            logger.debug(traceback.format_exc())
-
 def process_batch(page, urls: list[str], config: dict):
     """Process a batch of orders."""
     order_dict = create_order_dict(urls)
@@ -228,7 +160,11 @@ def process_batch(page, urls: list[str], config: dict):
     # Process refunds if links were found
     if any(data.get('refund_urls', []) for data in order_dict.values()):
         print("\n🎯 Starting refund submissions...")
-        order_dict = process_refunds(page, order_dict, config['image_path'], config['refund_message'])
+        order_dict = process_refunds(page, order_dict, config['image_path'], 
+                                   config['refund_message'], config['refund_message_2'])
+    else:
+        print("\n❌ No refund links found to process!")
+        input("Press Enter to continue...")
 
 def main(development_mode=False):
     """Main entry point for the script."""
@@ -237,11 +173,14 @@ def main(development_mode=False):
         setup_credentials()
         config = get_initial_config()
     else:
+        print("\n🔍 Starting in development mode...")
         config = {
             'pause_for_review': False,
             'image_path': IMAGE_PATH,
             'refund_message': REFUND_MESSAGE
         }
+        if not os.path.exists(config['image_path']):
+            raise ValueError(f"Development mode requires valid IMAGE_PATH. Current path not found: {config['image_path']}")
     
     print("\n🌐 Launching browser...")
     
@@ -278,10 +217,42 @@ def main(development_mode=False):
             login_handler.login()
             login_handler.navigate_to_orders()
             
+            # Add selection buttons in both modes
+            add_checkboxes_to_orders(page)
+            
             if development_mode:
-                dev_mode(page, config['image_path'], config['refund_message'])
+                # Process test URLs directly
+                print("\n📋 Processing test URLs...")
+                order_dict = create_order_dict(DEV_TEST_URLS)
+                process_batch(page, DEV_TEST_URLS, config)
             else:
-                normal_mode(page, config)
+                # Normal mode - wait for button click
+                page.evaluate('''() => {
+                    window.startProcessing = false;
+                    document.addEventListener('processOrdersClicked', () => {
+                        console.log('DEBUG: Process button clicked');
+                        window.startProcessing = true;
+                    });
+                }''')
+                
+                print("\n✅ Setup complete!")
+                print("Select orders and click 'Process All Refunds' to begin")
+                print("Press Ctrl+C to quit")
+                
+                while True:
+                    should_process = page.evaluate('window.startProcessing || false')
+                    if should_process:
+                        urls = page.evaluate('window.selectedOrderUrls || []')
+                        if urls and len(urls) > 0:
+                            process_batch(page, urls, config)
+                            
+                        # Reset for next batch
+                        page.evaluate('''() => {
+                            window.startProcessing = false;
+                            window.selectedOrderUrls = [];
+                        }''')
+                        print("\n⏳ Waiting for new orders...")
+                    time.sleep(1)
                 
         except KeyboardInterrupt:
             print("\n👋 Closing browser...")

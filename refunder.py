@@ -4,20 +4,30 @@ import time
 
 logger = logging.getLogger(__name__)
 
+
 class Refunder:
-    def __init__(self, page: Page, image_path: str, refund_message: str):
+    def __init__(self, page: Page, image_path: str, refund_message: str, refund_message_2: str):
         self.page = page
         self.image_path = image_path
         self.refund_message = refund_message
-
+        self.refund_message_2 = refund_message_2
+        
     def check_refund_status(self) -> str:
         """Check if refund is already issued or in another state"""
         try:
+            # Check for completed refund
             refund_complete = self.page.locator('.reminder--statusStr--3FMxRSU:has-text("Refund complete")').first
             if refund_complete.is_visible():
                 logger.debug("Found 'Refund complete' status")
                 return "refund_already_issued"
             
+            # Check for waiting response state
+            waiting_response = self.page.locator('.reminder--statusStr--3FMxRSU:has-text("Waiting for your response")').first
+            if waiting_response.is_visible():
+                logger.debug("Found 'Waiting for response' status")
+                return "needs_response"
+            
+            # Check for normal refund form
             dropdown = self.page.locator('.comet-v2-select-show-arrow').first
             if dropdown.is_visible():
                 logger.debug("Found refund form dropdown")
@@ -99,6 +109,51 @@ class Refunder:
             print(f"❌ Error filling refund form: {e}")
             return False
 
+    def handle_waiting_response(self) -> bool:
+        """Handle the case where we need to disagree and provide more evidence"""
+        try:
+            print("  • Handling waiting response case...")
+            
+            # Click View possible solutions
+            solutions_button = self.page.locator('button:has-text("View possible solutions")').first
+            solutions_button.click()
+            time.sleep(1)
+            
+            # Click disagree checkbox
+            disagree_checkbox = self.page.locator('.cco--checkTitle--Gzot0Aj:has-text("I don\'t agree with above solution(s)")').first
+            disagree_checkbox.click()
+            time.sleep(1)
+            
+            # Click Upload more photos/videos
+            upload_button = self.page.locator('button:has-text("Upload more photos/videos")').first
+            upload_button.click()
+            time.sleep(1)
+            
+            # Fill in the evidence form
+            textarea = self.page.locator('.evidence--textarea--2LZFL8b').first
+            textarea.fill(self.refund_message_2)  # Use second message for disagreement
+            
+            # Upload image
+            file_input = self.page.locator('input[type="file"][accept*="image"]').first
+            file_input.set_input_files(self.image_path)
+            
+            # Wait for image upload
+            print("  • Waiting for image upload...")
+            self.page.wait_for_selector('.upload--imageContainer--3tTIByI .upload--imageThumb--1diFoUj[style*="background-image"]', timeout=30000)
+            print("  • ✅ Image uploaded successfully")
+            
+            # Click Submit
+            submit_button = self.page.locator('.comet-v2-modal-footer button:has-text("Submit")').first
+            submit_button.wait_for(state='enabled')
+            submit_button.click()
+            
+            print("  • ✅ Additional evidence submitted")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error handling waiting response: {e}")
+            return False
+
     def process_refund_page(self, refund_url: str) -> bool:
         """Process a single refund page"""
         try:
@@ -113,20 +168,23 @@ class Refunder:
             if status == "refund_already_issued":
                 print("✅ Refund was already issued!")
                 return True
-                
-            if status != "can_submit":
-                print("❌ Cannot submit refund - status unclear")
-                return False
             
-            # If we can submit, proceed with refund submission
-            print("Proceeding with refund submission...")
-            return self.fill_refund_form()
+            if status == "needs_response":
+                print("📝 Need to provide additional evidence...")
+                return self.handle_waiting_response()
+                
+            if status == "can_submit":
+                print("Proceeding with refund submission...")
+                return self.fill_refund_form()
+            
+            print("❌ Cannot submit refund - status unclear")
+            return False
             
         except Exception as e:
             print(f"❌ Error processing refund: {e}")
             return False
 
-def process_refunds(page: Page, order_dict: dict, image_path: str, refund_message: str) -> dict:
+def process_refunds(page: Page, order_dict: dict, image_path: str, refund_message: str, refund_message_2: str) -> dict:
     """Process refunds and update dictionary with results"""
     successful = 0
     failed = 0
@@ -141,9 +199,54 @@ def process_refunds(page: Page, order_dict: dict, image_path: str, refund_messag
     
     for order_id, data in order_dict.items():
         refund_urls = data.get('refund_urls', [])
+        
+        # Handle case where no refund links were found
         if not refund_urls:
-            continue
+            print(f"\n⚠️ No refund links found for Order {order_id}")
+            print("Options:")
+            print("1. Try to detect refund link again")
+            print("2. Enter refund URL manually")
+            print("3. Skip this order")
             
+            choice = input("\nEnter choice (1-3): ").strip()
+            
+            if choice == "1":
+                print("\nOpening order page...")
+                page.goto(data['order_url'])
+                page.wait_for_load_state('networkidle')
+                input("\nPress Enter after clicking the refund button...")
+                
+                # Try to detect new refund tabs
+                new_refund_urls = []
+                for p in page.context.pages:
+                    if 'reverse-pages' in p.url and p.url not in refund_urls:
+                        new_refund_urls.append(p.url)
+                        print(f"Found new refund URL: {p.url}")
+                
+                if new_refund_urls:
+                    refund_urls.extend(new_refund_urls)
+                    data['refund_urls'] = refund_urls
+                    print(f"✅ Added {len(new_refund_urls)} new refund URLs")
+                else:
+                    print("❌ No new refund URLs detected")
+            
+            elif choice == "2":
+                manual_url = input("\nEnter the refund URL: ").strip()
+                if manual_url:
+                    refund_urls.append(manual_url)
+                    data['refund_urls'] = refund_urls
+                    print("✅ Added manual refund URL")
+            
+            elif choice == "3":
+                print("Skipping order...")
+                continue
+            
+            # If still no URLs, skip this order
+            if not refund_urls:
+                print(f"❌ No refund URLs available for Order {order_id}, skipping...")
+                failed += 1
+                continue
+        
         print(f"\n🔄 Order {order_id}:")
         
         for i, refund_url in enumerate(refund_urls, 1):
@@ -158,7 +261,7 @@ def process_refunds(page: Page, order_dict: dict, image_path: str, refund_messag
                 refund_page.wait_for_load_state('networkidle')
                 
                 # Create new Refunder instance with the new page
-                refunder = Refunder(refund_page, image_path, refund_message)
+                refunder = Refunder(refund_page, image_path, refund_message, refund_message_2)
                 status = refunder.check_refund_status()
                 
                 if status == "refund_already_issued":
@@ -166,6 +269,9 @@ def process_refunds(page: Page, order_dict: dict, image_path: str, refund_messag
                     successful += 1
                 elif status == "can_submit" and refunder.fill_refund_form():
                     print("    ✅ Refund submitted")
+                    successful += 1
+                elif status == "needs_response" and refunder.handle_waiting_response():
+                    print("    ✅ Additional evidence submitted")
                     successful += 1
                 else:
                     print("    ❓ Status unclear")

@@ -66,17 +66,19 @@ def handle_refund_process(page: Page, order_dict: dict) -> dict:
                         no_button.click()
                         time.sleep(WAIT_AFTER_NO_BUTTON)
                 
-                # Wait for new tabs to open and load
-                print(f"  • Waiting for refund pages to load...")
-                time.sleep(2)  # Hard wait for tab opening
+                # Immediately navigate to next order or back to list
+                print("  • Waiting for refund pages to load...")
+                if i < len(order_items) - 1:
+                    next_url = order_items[i + 1][1]['order_url']
+                    print("  • Navigating to next order...")
+                else:
+                    next_url = "https://www.aliexpress.com/p/order/index.html"
+                    print("  • Navigating back to order list...")
                 
-                # Wait for all pages to finish loading
-                for p in page.context.pages:
-                    if 'reverse-pages' in p.url:
-                        try:
-                            p.wait_for_load_state('networkidle', timeout=5000)
-                        except Exception as e:
-                            logger.warning(f"Page load timeout: {e}")
+                page.goto(next_url)
+                
+                # Now wait for tabs to open
+                time.sleep(3)  # Increased wait time to ensure all tabs open
                 
                 # Collect all refund pages that were opened for this order
                 refund_pages = get_refund_pages(page.context)
@@ -86,22 +88,12 @@ def handle_refund_process(page: Page, order_dict: dict) -> dict:
                     print(f"  • Order {order_id}: ✅ Found {len(refund_pages)} refund links")
                 else:
                     print(f"  • Order {order_id}: ❌ No refund links found")
+                    input("\n⚠️ No refund links found for this order! Press Enter to continue or Ctrl+C to quit...")
                 
                 # Close all refund pages before moving to next order
                 for p in page.context.pages:
                     if 'reverse-pages' in p.url:
                         p.close()
-                
-                # Navigate to next order or back to list
-                if i < len(order_items) - 1:
-                    next_url = order_items[i + 1][1]['order_url']
-                    print("  • Navigating to next order...")
-                else:
-                    next_url = "https://www.aliexpress.com/p/order/index.html"
-                    print("  • Navigating back to order list...")
-                
-                page.goto(next_url)
-                time.sleep(WAIT_AFTER_NAVIGATION)
                 
             except Exception as e:
                 logger.error(f"Error processing order {order_id}: {e}")
