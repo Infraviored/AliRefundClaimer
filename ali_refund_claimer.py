@@ -42,12 +42,32 @@ logger = logging.getLogger(__name__)
 
 # Development Mode Constants
 # Note: Only used when development_mode=True
+
+#   • 3044357010127135
+#   • 3043329396767135
+#   • 3043091352607135
+#   • 3043091352627135
+#   • 3043091352647135
+#   • 3042816799787135
+#   • 3042417938137135
+#   • 3042417938157135
+#   • 3042417938177135
+#   • 3042417938197135
+#   • 3042417938217135
 DEV_TEST_URLS = [
-    "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352647135",  # 2 refund buttons
-    "https://www.aliexpress.com/p/order/detail.html?orderId=3042816799787135",  # 1 refund button
+#     "https://www.aliexpress.com/p/order/detail.html?orderId=3044357010127135",  # 2 refund buttons
+#     "https://www.aliexpress.com/p/order/detail.html?orderId=3043329396767135",  # 2 refund buttons
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352607135",  # 2 refund buttons
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352627135",  # 2 refund buttons
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3043091352647135",  # 2 refund buttons
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3042816799787135",  # 1 refund button
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938137135",  # 1 refund button
+    # "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938157135",  # 1 refund button
     "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938177135",  # 1 button, no refund link
-    "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938197135"   # 1 refund button
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938197135",  # 1 refund button
+    "https://www.aliexpress.com/p/order/detail.html?orderId=3042417938217135"   # 1 refund button
 ]
+
 IMAGE_PATH = "/home/schneider/Downloads/hermes_return_page-0001.jpg"  # Required for development mode
 REFUND_MESSAGE = "The package was not picked up in time and was RETURNED to the sender. The attached document shows this"
 REFUND_MESSAGE_2 = "I do NOT AGREE. THE PACKAGE WAS RETURNED! I expect a full refund! Check the attached document!"
@@ -91,7 +111,8 @@ def get_initial_config() -> dict:
     config = {
         'pause_for_review': False,
         'image_path': None,
-        'refund_message': DEFAULT_REFUND_MESSAGE
+        'refund_message': DEFAULT_REFUND_MESSAGE,
+        'refund_message_2': DEFAULT_REFUND_MESSAGE_2
     }
     
     print("\n⚙️ Process Configuration:")
@@ -107,15 +128,17 @@ def get_initial_config() -> dict:
             break
         print("  • ❌ Image not found, please try again")
     
-    # Get refund message
-    print("\nUse default refund message?")
-    print(f"  {DEFAULT_REFUND_MESSAGE}")
-    choice = input("\nPress Enter to use default, or 'n' for custom message: ").strip().lower()
+    # Get refund messages
+    print("\nUse default refund messages?")
+    print(f"Message 1 (Initial): {DEFAULT_REFUND_MESSAGE}")
+    print(f"Message 2 (Disagreement): {DEFAULT_REFUND_MESSAGE_2}")
+    choice = input("\nPress Enter to use default, or 'n' for custom messages: ").strip().lower()
     if choice == 'n':
-        config['refund_message'] = input("\nEnter your custom refund message: ").strip()
-        print("  • ✅ Using custom message")
+        config['refund_message'] = input("\nEnter your custom initial message: ").strip()
+        config['refund_message_2'] = input("Enter your custom disagreement message: ").strip()
+        print("  • ✅ Using custom messages")
     else:
-        print("  • ✅ Using default message")
+        print("  • ✅ Using default messages")
     
     return config
 
@@ -177,7 +200,8 @@ def main(development_mode=False):
         config = {
             'pause_for_review': False,
             'image_path': IMAGE_PATH,
-            'refund_message': REFUND_MESSAGE
+            'refund_message': REFUND_MESSAGE,
+            'refund_message_2': REFUND_MESSAGE_2
         }
         if not os.path.exists(config['image_path']):
             raise ValueError(f"Development mode requires valid IMAGE_PATH. Current path not found: {config['image_path']}")
@@ -223,7 +247,7 @@ def main(development_mode=False):
             if development_mode:
                 # Process test URLs directly
                 print("\n📋 Processing test URLs...")
-                order_dict = create_order_dict(DEV_TEST_URLS)
+                _ = create_order_dict(DEV_TEST_URLS)
                 process_batch(page, DEV_TEST_URLS, config)
             else:
                 # Normal mode - wait for button click
@@ -262,3 +286,4 @@ def main(development_mode=False):
 
 if __name__ == "__main__":
     main(development_mode=True)
+    

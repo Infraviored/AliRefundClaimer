@@ -27,11 +27,29 @@ class Refunder:
                 logger.debug("Found 'Waiting for response' status")
                 return "needs_response"
             
+            # Check for ongoing review state - updated locators
+            ongoing_review_title = self.page.locator('.verticalSteps--title--1m4xoBw:has-text("We\'re reviewing your request")').first
+            ongoing_review_status = self.page.locator('.reminder--statusStr--3FMxRSU:has-text("Waiting for AliExpress\'s feedback")').first
+            
+            if ongoing_review_title.is_visible() or ongoing_review_status.is_visible():
+                logger.debug("Found 'Waiting for feedback' status")
+                # Debug info
+                print("    Debug: Found review status")
+                print(f"    Title visible: {ongoing_review_title.is_visible()}")
+                print(f"    Status visible: {ongoing_review_status.is_visible()}")
+                return "refund_ongoing"
+            
             # Check for normal refund form
             dropdown = self.page.locator('.comet-v2-select-show-arrow').first
             if dropdown.is_visible():
                 logger.debug("Found refund form dropdown")
                 return "can_submit"
+            
+            # Debug info for unclear status
+            print("    Debug: Could not determine status")
+            print("    Trying to find review elements:")
+            print(f"    Review title exists: {ongoing_review_title.count() > 0}")
+            print(f"    Review status exists: {ongoing_review_status.count() > 0}")
             
             logger.debug("Could not determine refund status")
             return "unclear"
@@ -48,17 +66,17 @@ class Refunder:
             logger.debug("Selecting refund reason")
             dropdown = self.page.locator('.comet-v2-select-show-arrow').first
             dropdown.click()
-            time.sleep(1)
+            time.sleep(.1)
             
             logger.debug("Selecting reason: Tracked as returned/canceled/lost")
             reason = self.page.locator('.comet-v2-menu-item:has-text("Tracked as returned/canceled/lost")').first
             reason.click()
-            time.sleep(1)
+            time.sleep(.1)
             
             logger.debug("Entering message")
             textarea = self.page.locator('.commet--textarea--Sg0xapL').first
             textarea.fill(self.refund_message)
-            time.sleep(1)
+            time.sleep(.1)
             
             logger.debug("Uploading image")
             file_input = self.page.locator('input[type="file"]').first
@@ -96,7 +114,7 @@ class Refunder:
                 confirm_button = self.page.locator('.comet-v2-modal-footer button:has-text("Confirm")').first
                 confirm_button.wait_for(state='visible', timeout=10000)
                 confirm_button.click()
-                time.sleep(1)
+                time.sleep(3)
                 
                 print("  • ✅ Refund form submitted successfully")
                 return True
@@ -117,38 +135,53 @@ class Refunder:
             # Click View possible solutions
             solutions_button = self.page.locator('button:has-text("View possible solutions")').first
             solutions_button.click()
-            time.sleep(1)
+            time.sleep(.1)
             
             # Click disagree checkbox
             disagree_checkbox = self.page.locator('.cco--checkTitle--Gzot0Aj:has-text("I don\'t agree with above solution(s)")').first
             disagree_checkbox.click()
-            time.sleep(1)
+            time.sleep(.1)
             
-            # Click Upload more photos/videos
+            # Click Upload more photos/videos and wait for modal
             upload_button = self.page.locator('button:has-text("Upload more photos/videos")').first
             upload_button.click()
-            time.sleep(1)
             
-            # Fill in the evidence form
+            # Wait for modal to appear and textarea to be visible
+            print("  • Waiting for upload modal...")
             textarea = self.page.locator('.evidence--textarea--2LZFL8b').first
-            textarea.fill(self.refund_message_2)  # Use second message for disagreement
+            textarea.wait_for(state='visible', timeout=10000)
             
-            # Upload image
+            # Fill in the evidence text first
+            print("  • Entering disagreement message...")
+            textarea.fill(self.refund_message_2)
+            time.sleep(.1)
+            
+            # Now upload the image
+            print("  • Uploading image...")
             file_input = self.page.locator('input[type="file"][accept*="image"]').first
             file_input.set_input_files(self.image_path)
             
-            # Wait for image upload
+            # Wait for image upload to complete
             print("  • Waiting for image upload...")
-            self.page.wait_for_selector('.upload--imageContainer--3tTIByI .upload--imageThumb--1diFoUj[style*="background-image"]', timeout=30000)
-            print("  • ✅ Image uploaded successfully")
-            
-            # Click Submit
-            submit_button = self.page.locator('.comet-v2-modal-footer button:has-text("Submit")').first
-            submit_button.wait_for(state='enabled')
-            submit_button.click()
-            
-            print("  • ✅ Additional evidence submitted")
-            return True
+            try:
+                # Wait for the specific success structure: container with thumbnail that has background-image
+                self.page.wait_for_selector('.upload--imageContainer--3tTIByI .upload--imageThumb--1diFoUj[style*="background-image"]', 
+                                          timeout=30000)
+                print("  • ✅ Image uploaded successfully")
+                
+                # Wait for submit button to become enabled and visible
+                submit_button = self.page.locator('.comet-v2-modal-footer button.comet-v2-btn-primary').first
+                submit_button.wait_for(state='visible', timeout=10000)
+                time.sleep(1)  # Small delay to ensure button is clickable
+                submit_button.click()
+                time.sleep(3)
+                
+                print("  • ✅ Additional evidence submitted")
+                return True
+                
+            except Exception as e:
+                print(f"❌ Error during image upload or submission: {e}")
+                return False
             
         except Exception as e:
             print(f"❌ Error handling waiting response: {e}")
@@ -165,20 +198,26 @@ class Refunder:
             status = self.check_refund_status()
             print(f"Detected refund status: {status}")
             
-            if status == "refund_already_issued":
-                print("✅ Refund was already issued!")
-                return True
-            
-            if status == "needs_response":
-                print("📝 Need to provide additional evidence...")
-                return self.handle_waiting_response()
+            match status:
+                case "refund_already_issued":
+                    print("    ✅ Refund already issued")
+                    return True
                 
-            if status == "can_submit":
-                print("Proceeding with refund submission...")
-                return self.fill_refund_form()
-            
-            print("❌ Cannot submit refund - status unclear")
-            return False
+                case "needs_response":
+                    print("📝 Need to provide additional evidence...")
+                    return self.handle_waiting_response()
+                    
+                case "can_submit":
+                    print("Proceeding with refund submission...")
+                    return self.fill_refund_form()
+                    
+                case "refund_ongoing":
+                    print("    ⏳ Refund is under review by AliExpress")
+                    return True  # Mark as successful since we've identified the state
+                
+                case _:
+                    print("❌ Cannot submit refund - status unclear")
+                    return False
             
         except Exception as e:
             print(f"❌ Error processing refund: {e}")
@@ -257,32 +296,44 @@ def process_refunds(page: Page, order_dict: dict, image_path: str, refund_messag
                 # Open fresh tab with Playwright
                 refund_page = page.context.new_page()
                 refund_page.goto(refund_url)
-                refund_page.bring_to_front()  # Ensure this tab is visible
+                refund_page.bring_to_front()
                 refund_page.wait_for_load_state('networkidle')
                 
                 # Create new Refunder instance with the new page
                 refunder = Refunder(refund_page, image_path, refund_message, refund_message_2)
                 status = refunder.check_refund_status()
                 
-                if status == "refund_already_issued":
-                    print("    ✅ Refund already issued")
-                    successful += 1
-                elif status == "can_submit" and refunder.fill_refund_form():
-                    print("    ✅ Refund submitted")
-                    successful += 1
-                elif status == "needs_response" and refunder.handle_waiting_response():
-                    print("    ✅ Additional evidence submitted")
-                    successful += 1
-                else:
-                    print("    ❓ Status unclear")
-                    failed += 1
+                match status:
+                    case "refund_already_issued":
+                        print("    ✅ Refund already issued")
+                        successful += 1
+                    case "needs_response":
+                        if refunder.handle_waiting_response():
+                            print("    ✅ Additional evidence submitted")
+                            successful += 1
+                        else:
+                            print("    ❌ Failed to submit additional evidence")
+                            failed += 1
+                    case "can_submit":
+                        if refunder.fill_refund_form():
+                            print("    ✅ Refund submitted")
+                            successful += 1
+                        else:
+                            print("    ❌ Failed to submit refund")
+                            failed += 1
+                    case "refund_ongoing":
+                        print("    ⏳ Refund is under review by AliExpress")
+                        successful += 1  # Count as success since it's a valid state
+                    case _:
+                        print("    ❌ Status unclear")
+                        failed += 1
                 
                 # Close the tab after processing
                 refund_page.close()
                 
             except Exception as e:
                 logger.error(f"Error processing order {order_id}: {e}")
-                print("    ❌ Processing failed")
+                print(f"    ❌ Processing failed: {e}")
                 failed += 1
             
             time.sleep(2)
