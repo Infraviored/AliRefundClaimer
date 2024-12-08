@@ -45,7 +45,7 @@ class LoginHandler:
         
         logger.debug("Navigating to orders page")
         self.page.goto('https://www.aliexpress.com/p/order/index.html')
-        time.sleep(3)
+        self.page.wait_for_load_state('networkidle')
         
         # Change language to English
         try:
@@ -57,7 +57,9 @@ class LoginHandler:
             print("  • Language set to English")
             
             logger.debug("Waiting for page to stabilize after language change")
-            time.sleep(3)
+            time.sleep(1)
+            
+            self.page.wait_for_load_state('networkidle')
             
         except Exception as e:
             logger.warning(f"Could not change language: {e}")

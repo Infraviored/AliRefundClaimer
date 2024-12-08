@@ -104,8 +104,11 @@ def dev_mode(page):
     order_dict = handle_refund_process(page, order_dict)
     print_order_state(order_dict, "getting refund URLs")
     
+    # Confirmation step
+    input("\nPress Enter to start processing refunds...")
+    
     # Process refunds
-    if any(data['refund_url'] for data in order_dict.values()):
+    if any(data.get('refund_urls', []) for data in order_dict.values()):
         print("\n🎯 Starting refund submissions...")
         order_dict = process_refunds(page, order_dict, IMAGE_PATH, REFUND_MESSAGE)
         print_order_state(order_dict, "refund processing")
@@ -175,10 +178,16 @@ def main(development_mode=True):
                                 for order_id in order_dict.keys():
                                     print(f"  • {order_id}")
                                 
+                                # Collect refund links
                                 order_dict = handle_refund_process(page, order_dict)
-                                if any(data['refund_url'] for data in order_dict.values()):
+                                
+                                # Process refunds if links were found
+                                if any(data.get('refund_urls', []) for data in order_dict.values()):
+                                    input("\nPress Enter to start processing refunds...")
+                                    print("\n🎯 Starting refund submissions...")
                                     order_dict = process_refunds(page, order_dict, image_path, refund_message)
                                 
+                                # Reset for next batch
                                 page.evaluate('''() => {
                                     window.startProcessing = false;
                                     window.selectedOrderUrls = [];
@@ -196,4 +205,4 @@ def main(development_mode=True):
             browser.close()
 
 if __name__ == "__main__":
-    main(development_mode=False)
+    main(development_mode=True)
